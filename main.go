@@ -24,12 +24,6 @@ var (
 )
 
 func main() {
-	fmt.Println("What do you want to do?")
-	fmt.Println("  type i for 'just clock in'")
-	fmt.Println("  type o for 'just clock out'")
-	fmt.Println("  type a for 'ask me again for every date'")
-	fmt.Scanln(&_inout)
-
 	var d dakoku
 
 	pw, err := playwright.Run()
@@ -70,20 +64,36 @@ func main() {
 
 	d.login()
 
-	d.openDakokuHistory()
-
 	for {
-		d.promptUserForDateToClock()
+		fmt.Println("What do you want to do?")
+		fmt.Println("  type i for 'clock in the same time for a range of date'")
+		fmt.Println("  type o for 'clock out the same time for a range of date'")
+		fmt.Println("  type a for 'ask me again for every date'")
+		fmt.Scanln(&_inout)
 
-		d.promptUserToChooseClockInOrOut()
+		_prevDay = ""
+		d.rangeStart = 0
+		d.rangeEnd = 0
+		d.rangeCurrentDay = 0
+		d.rangeTime = ""
 
-		d.promptUserToInputTime()
+		d.openDakokuHistory()
+
+		for d.handleRangeDakoku() {
+			d.promptUserForDateToClock()
+			d.promptUserToChooseClockInOrOut()
+			d.promptUserToInputTime()
+		}
 	}
 }
 
 type dakoku struct {
-	page playwright.Page
-	ctx  playwright.BrowserContext
+	page           playwright.Page
+	ctx            playwright.BrowserContext
+	rangeStart     int
+	rangeEnd       int
+	rangeCurrentDay int
+	rangeTime      string
 }
 
 func (d *dakoku) login() {
@@ -176,38 +186,134 @@ func (d *dakoku) getAllHolidays() []int {
 	return holidays
 }
 
-func (d *dakoku) promptUserForDateToClock() {
+// handleRangeDakoku manages the range-mode flow for i/o.
+// On the first call it prompts for range and time, sets rangeCurrentDay to the first working day.
+// On subsequent calls it advances rangeCurrentDay to the next working day in the range.
+// Returns false when the range is exhausted (caller should break the loop).
+// In ASK_EVERYTIME mode it is a no-op and always returns true.
+func (d *dakoku) handleRangeDakoku() bool {
+	if _inout == ASK_EVERYTIME {
+		return true
+	}
+
 	log.Printf("waiting for page to load")
 	if err := d.page.Locator(`.cm-p-scrTbl__scrAreaTbl`).WaitFor(playwright.LocatorWaitForOptions{State: playwright.WaitForSelectorStateVisible}); err != nil {
 		log.Fatalf("could not wait for page to load: %v", err)
 	}
 
-	var input string
-	var nextDay string
-	for {
-		fmt.Println("type date to access. Just the day number is enough. Examples: ")
-		fmt.Println("  7 (for the 7th day of the month)")
-		fmt.Println("  14 (for the 14th day of the month)")
-		if _prevDay != "" {
-			nextDay = d.getNextWorkingDay(_prevDay)
-			if nextDay != "" {
-				fmt.Printf("  %s (next working day. using this if input is empty)", nextDay)
+	if d.rangeCurrentDay == 0 {
+		var startInput string
+		for {
+			fmt.Println("input start date of range. Example: 7 (for the 7th)")
+			fmt.Scanln(&startInput)
+			if strings.TrimSpace(startInput) != "" {
+				break
 			}
 		}
-		fmt.Scanln(&input)
-		if strings.TrimSpace(input) == "" {
-			if nextDay == "" {
-				fmt.Println("no input given. prompting again")
-				continue
+		start, err := strconv.Atoi(startInput)
+		if err != nil {
+			log.Fatalf("start date is not an integer")
+		}
+
+		var endInput string
+		for {
+			fmt.Println("input end date of range. Example: 25 (for the 25th)")
+			fmt.Scanln(&endInput)
+			if strings.TrimSpace(endInput) != "" {
+				break
+			}
+		}
+		end, err := strconv.Atoi(endInput)
+		if err != nil {
+			log.Fatalf("end date is not an integer")
+		}
+
+		var timeInput string
+		for {
+			fmt.Println("input time for all dates. Examples:")
+			fmt.Println("  0700")
+			fmt.Println("  1815")
+			fmt.Scanln(&timeInput)
+			if strings.TrimSpace(timeInput) != "" {
+				break
+			}
+		}
+
+		d.rangeStart = start
+		d.rangeEnd = end
+		d.rangeTime = timeInput
+
+		holidays := d.getAllHolidays()
+		day := d.rangeStart
+		for slices.Contains(holidays, day) && day <= d.rangeEnd {
+			day++
+		}
+		if day > d.rangeEnd {
+			fmt.Println("No working days in specified range.")
+			return false
+		}
+		d.rangeCurrentDay = day
+		return true
+	}
+
+	holidays := d.getAllHolidays()
+	nextDay := d.rangeCurrentDay + 1
+	for slices.Contains(holidays, nextDay) && nextDay <= d.rangeEnd {
+		nextDay++
+	}
+	if nextDay > d.rangeEnd {
+		fmt.Println("Done! All dates in range have been clocked.")
+		return false
+	}
+	d.rangeCurrentDay = nextDay
+	return true
+}
+
+func (d *dakoku) promptUserForDateToClock() {
+	var dayToClick int
+
+	if _inout == ASK_EVERYTIME {
+		log.Printf("waiting for page to load")
+		if err := d.page.Locator(`.cm-p-scrTbl__scrAreaTbl`).WaitFor(playwright.LocatorWaitForOptions{State: playwright.WaitForSelectorStateVisible}); err != nil {
+			log.Fatalf("could not wait for page to load: %v", err)
+		}
+
+		var input string
+		var nextDay string
+		for {
+			fmt.Println("type date to access. Just the day number is enough. Examples: ")
+			fmt.Println("  7 (for the 7th day of the month)")
+			fmt.Println("  14 (for the 14th day of the month)")
+			if _prevDay != "" {
+				nextDay = d.getNextWorkingDay(_prevDay)
+				if nextDay != "" {
+					fmt.Printf("  %s (next working day. using this if input is empty)", nextDay)
+				}
+			}
+			fmt.Scanln(&input)
+			if strings.TrimSpace(input) == "" {
+				if nextDay == "" {
+					fmt.Println("no input given. prompting again")
+					continue
+				}
+
+				input = nextDay
+				_prevDay = input
+				break
 			}
 
-			input = nextDay
 			_prevDay = input
 			break
 		}
 
-		_prevDay = input
-		break
+		i, err := strconv.Atoi(input)
+		if err != nil {
+			log.Fatalf("date to access is not an integer")
+		}
+		dayToClick = i
+	} else {
+		log.Printf("processing day %d of range", d.rangeCurrentDay)
+		dayToClick = d.rangeCurrentDay
 	}
 
 	log.Printf("finding date buttons")
@@ -216,14 +322,9 @@ func (d *dakoku) promptUserForDateToClock() {
 		log.Fatalf("could not get : %v", err)
 	}
 
-	i, err := strconv.Atoi(input)
-	if err != nil {
-		log.Fatalf("date to access is not an integer")
-	}
-
-	log.Printf("clicking date %d's button", i)
-	if err := entries[i-1].Click(); err != nil {
-		log.Fatalf("could not click date %d's button: %v", i, err)
+	log.Printf("clicking date %d's button", dayToClick)
+	if err := entries[dayToClick-1].Click(); err != nil {
+		log.Fatalf("could not click date %d's button: %v", dayToClick, err)
 	}
 
 	log.Printf("clicking OK button")
@@ -293,27 +394,32 @@ func (d *dakoku) promptUserToChooseClockInOrOut() {
 
 func (d *dakoku) promptUserToInputTime() {
 	var input string
-	for {
-		fmt.Println("input time. Examples:")
-		fmt.Println("  0700")
-		fmt.Println("  1815")
-		if _prevTime != "" {
-			fmt.Printf("  %s (previously set. using this if input is empty)\n", _prevTime)
-		}
-		fmt.Scanln(&input)
 
-		if strings.TrimSpace(input) == "" {
-			if _prevTime == "" {
-				fmt.Println("no input given. prompting again")
-				continue
+	if _inout == ASK_EVERYTIME {
+		for {
+			fmt.Println("input time. Examples:")
+			fmt.Println("  0700")
+			fmt.Println("  1815")
+			if _prevTime != "" {
+				fmt.Printf("  %s (previously set. using this if input is empty)\n", _prevTime)
+			}
+			fmt.Scanln(&input)
+
+			if strings.TrimSpace(input) == "" {
+				if _prevTime == "" {
+					fmt.Println("no input given. prompting again")
+					continue
+				}
+
+				input = _prevTime
+				break
 			}
 
-			input = _prevTime
+			_prevTime = input
 			break
 		}
-
-		_prevTime = input
-		break
+	} else {
+		input = d.rangeTime
 	}
 
 	hour := input[:2]
