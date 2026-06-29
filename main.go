@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"slices"
@@ -15,15 +16,24 @@ const (
 	CLOCK_IN      string = "i"
 	CLOCK_OUT     string = "o"
 	ASK_EVERYTIME string = "a"
+	RANGE         string = "r"
 )
 
 var (
 	_inout    string
 	_prevDay  string
 	_prevTime string
+	_dryRun   bool
 )
 
 func main() {
+	flag.BoolVar(&_dryRun, "dry-run", false, "click 戻る instead of 申請 (for testing)")
+	flag.Parse()
+
+	if _dryRun {
+		fmt.Println("DRY RUN mode active: 戻る will be clicked instead of 申請")
+	}
+
 	var d dakoku
 
 	pw, err := playwright.Run()
@@ -66,8 +76,7 @@ func main() {
 
 	for {
 		fmt.Println("What do you want to do?")
-		fmt.Println("  type i for 'clock in the same time for a range of date'")
-		fmt.Println("  type o for 'clock out the same time for a range of date'")
+		fmt.Println("  type r for 'clock in and out the same times for a range of dates'")
 		fmt.Println("  type a for 'ask me again for every date'")
 		fmt.Scanln(&_inout)
 
@@ -75,25 +84,34 @@ func main() {
 		d.rangeStart = 0
 		d.rangeEnd = 0
 		d.rangeCurrentDay = 0
-		d.rangeTime = ""
+		d.rangeClockInTime = ""
+		d.rangeClockOutTime = ""
 
 		d.openDakokuHistory()
 
 		for d.handleRangeDakoku() {
-			d.promptUserForDateToClock()
-			d.promptUserToChooseClockInOrOut()
-			d.promptUserToInputTime()
+			if _inout == ASK_EVERYTIME {
+				d.promptUserForDateToClock()
+				d.promptUserToChooseClockInOrOut()
+				d.promptUserToInputTime()
+			} else {
+				d.promptUserForDateToClock()
+				d.clockWithDirectionAndTime(CLOCK_IN, d.rangeClockInTime)
+				d.promptUserForDateToClock()
+				d.clockWithDirectionAndTime(CLOCK_OUT, d.rangeClockOutTime)
+			}
 		}
 	}
 }
 
 type dakoku struct {
-	page           playwright.Page
-	ctx            playwright.BrowserContext
-	rangeStart     int
-	rangeEnd       int
-	rangeCurrentDay int
-	rangeTime      string
+	page              playwright.Page
+	ctx               playwright.BrowserContext
+	rangeStart        int
+	rangeEnd          int
+	rangeCurrentDay   int
+	rangeClockInTime  string
+	rangeClockOutTime string
 }
 
 func (d *dakoku) login() {
@@ -186,10 +204,10 @@ func (d *dakoku) getAllHolidays() []int {
 	return holidays
 }
 
-// handleRangeDakoku manages the range-mode flow for i/o.
-// On the first call it prompts for range and time, sets rangeCurrentDay to the first working day.
+// handleRangeDakoku manages the range-mode flow.
+// On the first call it prompts for range and both times, sets rangeCurrentDay to the first working day.
 // On subsequent calls it advances rangeCurrentDay to the next working day in the range.
-// Returns false when the range is exhausted (caller should break the loop).
+// Returns false when the range is exhausted.
 // In ASK_EVERYTIME mode it is a no-op and always returns true.
 func (d *dakoku) handleRangeDakoku() bool {
 	if _inout == ASK_EVERYTIME {
@@ -228,20 +246,32 @@ func (d *dakoku) handleRangeDakoku() bool {
 			log.Fatalf("end date is not an integer")
 		}
 
-		var timeInput string
+		var clockInInput string
 		for {
-			fmt.Println("input time for all dates. Examples:")
+			fmt.Println("input clock-in time for all dates. Examples:")
 			fmt.Println("  0700")
-			fmt.Println("  1815")
-			fmt.Scanln(&timeInput)
-			if strings.TrimSpace(timeInput) != "" {
+			fmt.Println("  0900")
+			fmt.Scanln(&clockInInput)
+			if strings.TrimSpace(clockInInput) != "" {
+				break
+			}
+		}
+
+		var clockOutInput string
+		for {
+			fmt.Println("input clock-out time for all dates. Examples:")
+			fmt.Println("  1800")
+			fmt.Println("  2015")
+			fmt.Scanln(&clockOutInput)
+			if strings.TrimSpace(clockOutInput) != "" {
 				break
 			}
 		}
 
 		d.rangeStart = start
 		d.rangeEnd = end
-		d.rangeTime = timeInput
+		d.rangeClockInTime = clockInInput
+		d.rangeClockOutTime = clockOutInput
 
 		holidays := d.getAllHolidays()
 		day := d.rangeStart
@@ -270,14 +300,14 @@ func (d *dakoku) handleRangeDakoku() bool {
 }
 
 func (d *dakoku) promptUserForDateToClock() {
+	log.Printf("waiting for page to load")
+	if err := d.page.Locator(`.cm-p-scrTbl__scrAreaTbl`).WaitFor(playwright.LocatorWaitForOptions{State: playwright.WaitForSelectorStateVisible}); err != nil {
+		log.Fatalf("could not wait for page to load: %v", err)
+	}
+
 	var dayToClick int
 
 	if _inout == ASK_EVERYTIME {
-		log.Printf("waiting for page to load")
-		if err := d.page.Locator(`.cm-p-scrTbl__scrAreaTbl`).WaitFor(playwright.LocatorWaitForOptions{State: playwright.WaitForSelectorStateVisible}); err != nil {
-			log.Fatalf("could not wait for page to load: %v", err)
-		}
-
 		var input string
 		var nextDay string
 		for {
@@ -367,14 +397,10 @@ func (d *dakoku) getNextWorkingDay(fromString string) string {
 
 func (d *dakoku) promptUserToChooseClockInOrOut() {
 	var input string
-	if _inout == ASK_EVERYTIME {
-		fmt.Println("choose clock in or out:")
-		fmt.Println("  type i for in")
-		fmt.Println("  type o for out")
-		fmt.Scanln(&input)
-	} else {
-		input = _inout
-	}
+	fmt.Println("choose clock in or out:")
+	fmt.Println("  type i for in")
+	fmt.Println("  type o for out")
+	fmt.Scanln(&input)
 
 	switch input {
 	case CLOCK_IN:
@@ -394,32 +420,27 @@ func (d *dakoku) promptUserToChooseClockInOrOut() {
 
 func (d *dakoku) promptUserToInputTime() {
 	var input string
+	for {
+		fmt.Println("input time. Examples:")
+		fmt.Println("  0700")
+		fmt.Println("  1815")
+		if _prevTime != "" {
+			fmt.Printf("  %s (previously set. using this if input is empty)\n", _prevTime)
+		}
+		fmt.Scanln(&input)
 
-	if _inout == ASK_EVERYTIME {
-		for {
-			fmt.Println("input time. Examples:")
-			fmt.Println("  0700")
-			fmt.Println("  1815")
-			if _prevTime != "" {
-				fmt.Printf("  %s (previously set. using this if input is empty)\n", _prevTime)
-			}
-			fmt.Scanln(&input)
-
-			if strings.TrimSpace(input) == "" {
-				if _prevTime == "" {
-					fmt.Println("no input given. prompting again")
-					continue
-				}
-
-				input = _prevTime
-				break
+		if strings.TrimSpace(input) == "" {
+			if _prevTime == "" {
+				fmt.Println("no input given. prompting again")
+				continue
 			}
 
-			_prevTime = input
+			input = _prevTime
 			break
 		}
-	} else {
-		input = d.rangeTime
+
+		_prevTime = input
+		break
 	}
 
 	hour := input[:2]
@@ -435,10 +456,51 @@ func (d *dakoku) promptUserToInputTime() {
 		log.Fatalf("could not fill in minute: %v", err)
 	}
 
-	log.Printf("clicking 申請 button")
-	if err := d.page.Locator(`.tm-af-applicationFormBtnArea`).GetByRole(playwright.AriaRole(`button`), playwright.LocatorGetByRoleOptions{Name: `申請`}).Click(); err != nil {
-		log.Fatalf("could not click 申請 button: %v", err)
-	}
+	d.submitOrGoBack()
 
 	// TODO: Add wait for Dakoku history URL
+}
+
+func (d *dakoku) clockWithDirectionAndTime(direction, timeInput string) {
+	switch direction {
+	case CLOCK_IN:
+		log.Printf("clicking 出勤 radio")
+		if err := d.page.GetByRole(`radio`, playwright.PageGetByRoleOptions{Name: `出勤`}).Click(); err != nil {
+			log.Fatalf("could not click 出勤 radio: %v", err)
+		}
+	case CLOCK_OUT:
+		log.Printf("clicking 退勤 radio")
+		if err := d.page.GetByRole(`radio`, playwright.PageGetByRoleOptions{Name: `退勤`}).Click(); err != nil {
+			log.Fatalf("could not click 退勤 radio: %v", err)
+		}
+	}
+
+	hour := timeInput[:2]
+	minute := timeInput[2:]
+
+	log.Printf("filling in hour")
+	if err := d.page.GetByRole(`textbox`, playwright.PageGetByRoleOptions{Name: `時`}).Fill(hour); err != nil {
+		log.Fatalf("could not fill in hour: %v", err)
+	}
+
+	log.Printf("filling in minute")
+	if err := d.page.GetByRole(`textbox`, playwright.PageGetByRoleOptions{Name: `分`}).Fill(minute); err != nil {
+		log.Fatalf("could not fill in minute: %v", err)
+	}
+
+	d.submitOrGoBack()
+}
+
+func (d *dakoku) submitOrGoBack() {
+	if _dryRun {
+		log.Printf("dry run: clicking 戻る instead of 申請")
+		if err := d.page.Locator(`.js-back`).Click(); err != nil {
+			log.Fatalf("could not click 戻る button: %v", err)
+		}
+	} else {
+		log.Printf("clicking 申請 button")
+		if err := d.page.Locator(`.tm-af-applicationFormBtnArea`).GetByRole(playwright.AriaRole(`button`), playwright.LocatorGetByRoleOptions{Name: `申請`}).Click(); err != nil {
+			log.Fatalf("could not click 申請 button: %v", err)
+		}
+	}
 }
