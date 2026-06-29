@@ -100,51 +100,10 @@ func (d *dakoku) login() {
 		log.Fatalf("could not goto: %v", err)
 	}
 
-	// If already logged in due to cookies, the page jumps to timerecorder, and URL is different.
-	// ID input element is not present.
-	// So, skip entering ID
-	if d.page.URL() == "https://id.obc.jp/mx3gddbo4wn1/?manuallogin=True" {
-		log.Printf("finding ID input")
-		entries, err := d.page.Locator(".inputText").All()
-		if err != nil {
-			log.Fatalf("could not get entries: %v", err)
-		}
-
-		idArea := entries[0]
-		log.Printf("getting ID input text")
-		id, err := idArea.InnerText()
-		if err != nil {
-			log.Fatalf("could not get ID input text")
-		}
-		log.Printf("got it. It's '%s'", id)
-
-		if id == "" {
-			var input string
-			fmt.Println("input your dakoku ID. Example:")
-			fmt.Println("  mirumiru@macromill.com")
-			fmt.Scanln(&input)
-
-			log.Printf("typing ID")
-			if err := idArea.Fill(input); err != nil {
-				log.Fatalf("could not type in ID area: %v", err)
-			}
-
-			log.Printf("pressing Enter to proceed")
-			if err := d.page.Keyboard().Press(`Enter`); err != nil {
-				log.Fatalf("could not type Enter: %v", err)
-			}
-		} else {
-			log.Printf("clicking ID input to proceed")
-			if err := idArea.Click(); err != nil {
-				log.Fatalf("could not click ID input: %v", err)
-			}
-		}
-
-	}
-
-	log.Printf("waiting for page to load")
-	if err := d.page.GetByRole(playwright.AriaRole(`button`), playwright.PageGetByRoleOptions{Name: `勤務実績`, Exact: &[]bool{true}[0]}).WaitFor(playwright.LocatorWaitForOptions{State: playwright.WaitForSelectorStateVisible}); err != nil {
-		log.Fatalf("could not wait for page to load: %v", err)
+	log.Printf("waiting for login (up to 3 minutes)")
+	timeout := float64(3 * 60 * 1000)
+	if err := d.page.GetByRole(playwright.AriaRole(`button`), playwright.PageGetByRoleOptions{Name: `勤務実績`, Exact: &[]bool{true}[0]}).WaitFor(playwright.LocatorWaitForOptions{State: playwright.WaitForSelectorStateVisible, Timeout: &timeout}); err != nil {
+		log.Fatalf("could not log in within 3 minutes: %v", err)
 	}
 
 	d.ctx.StorageState("storage.json")
