@@ -157,8 +157,7 @@ func (d *dakoku) handleRangeDakoku() bool {
 	if d.rangeCurrentDay == 0 {
 		var startInput string
 		for {
-			fmt.Println("input start date of range. Example: 7 (for the 7th)")
-			fmt.Println("  type q to quit")
+			fmt.Println("input start date of range, or q to quit. Example: 7 (for the 7th)")
 			fmt.Scanln(&startInput)
 			if strings.TrimSpace(startInput) == "q" {
 				fmt.Println("Goodbye!")
@@ -175,8 +174,12 @@ func (d *dakoku) handleRangeDakoku() bool {
 
 		var endInput string
 		for {
-			fmt.Println("input end date of range. Example: 25 (for the 25th)")
+			fmt.Println("input end date of range, or q to quit. Example: 25 (for the 25th)")
 			fmt.Scanln(&endInput)
+			if strings.TrimSpace(endInput) == "q" {
+				fmt.Println("Goodbye!")
+				os.Exit(0)
+			}
 			if strings.TrimSpace(endInput) != "" {
 				break
 			}
@@ -188,10 +191,14 @@ func (d *dakoku) handleRangeDakoku() bool {
 
 		var clockInInput string
 		for {
-			fmt.Println("input clock-in time for all dates. Examples:")
+			fmt.Println("input clock-in time for all dates, or q to quit. Examples:")
 			fmt.Println("  0700")
 			fmt.Println("  0900")
 			fmt.Scanln(&clockInInput)
+			if strings.TrimSpace(clockInInput) == "q" {
+				fmt.Println("Goodbye!")
+				os.Exit(0)
+			}
 			if strings.TrimSpace(clockInInput) != "" {
 				break
 			}
@@ -199,10 +206,14 @@ func (d *dakoku) handleRangeDakoku() bool {
 
 		var clockOutInput string
 		for {
-			fmt.Println("input clock-out time for all dates. Examples:")
+			fmt.Println("input clock-out time for all dates, or q to quit. Examples:")
 			fmt.Println("  1800")
 			fmt.Println("  2015")
 			fmt.Scanln(&clockOutInput)
+			if strings.TrimSpace(clockOutInput) == "q" {
+				fmt.Println("Goodbye!")
+				os.Exit(0)
+			}
 			if strings.TrimSpace(clockOutInput) != "" {
 				break
 			}
