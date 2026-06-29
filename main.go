@@ -75,6 +75,8 @@ func main() {
 	d.login()
 
 	for {
+		d.openDakokuHistory()
+
 		fmt.Println("What do you want to do?")
 		fmt.Println("  type r for 'clock in and out the same times for a range of dates'")
 		fmt.Println("  type a for 'ask me again for every date'")
@@ -86,8 +88,6 @@ func main() {
 		d.rangeCurrentDay = 0
 		d.rangeClockInTime = ""
 		d.rangeClockOutTime = ""
-
-		d.openDakokuHistory()
 
 		for d.handleRangeDakoku() {
 			if _inout == ASK_EVERYTIME {
