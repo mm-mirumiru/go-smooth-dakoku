@@ -7,24 +7,16 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/playwright-community/playwright-go"
 )
 
 const (
-	CLOCK_IN      string = "i"
-	CLOCK_OUT     string = "o"
-	ASK_EVERYTIME string = "a"
-	RANGE         string = "r"
+	CLOCK_IN  string = "i"
+	CLOCK_OUT string = "o"
 )
 
-var (
-	_inout    string
-	_prevDay  string
-	_prevTime string
-	_dryRun   bool
-)
+var _dryRun bool
 
 func main() {
 	flag.BoolVar(&_dryRun, "dry-run", false, "click 戻る instead of 申請 (for testing)")
@@ -77,12 +69,6 @@ func main() {
 	for {
 		d.openDakokuHistory()
 
-		fmt.Println("What do you want to do?")
-		fmt.Println("  type r for 'clock in and out the same times for a range of dates'")
-		fmt.Println("  type a for 'ask me again for every date'")
-		fmt.Scanln(&_inout)
-
-		_prevDay = ""
 		d.rangeStart = 0
 		d.rangeEnd = 0
 		d.rangeCurrentDay = 0
@@ -90,16 +76,10 @@ func main() {
 		d.rangeClockOutTime = ""
 
 		for d.handleRangeDakoku() {
-			if _inout == ASK_EVERYTIME {
-				d.promptUserForDateToClock()
-				d.promptUserToChooseClockInOrOut()
-				d.promptUserToInputTime()
-			} else {
-				d.promptUserForDateToClock()
-				d.clockWithDirectionAndTime(CLOCK_IN, d.rangeClockInTime)
-				d.promptUserForDateToClock()
-				d.clockWithDirectionAndTime(CLOCK_OUT, d.rangeClockOutTime)
-			}
+			d.openDateForm()
+			d.clockWithDirectionAndTime(CLOCK_IN, d.rangeClockInTime)
+			d.openDateForm()
+			d.clockWithDirectionAndTime(CLOCK_OUT, d.rangeClockOutTime)
 		}
 	}
 }
@@ -208,12 +188,7 @@ func (d *dakoku) getAllHolidays() []int {
 // On the first call it prompts for range and both times, sets rangeCurrentDay to the first working day.
 // On subsequent calls it advances rangeCurrentDay to the next working day in the range.
 // Returns false when the range is exhausted.
-// In ASK_EVERYTIME mode it is a no-op and always returns true.
 func (d *dakoku) handleRangeDakoku() bool {
-	if _inout == ASK_EVERYTIME {
-		return true
-	}
-
 	log.Printf("waiting for page to load")
 	if err := d.page.Locator(`.cm-p-scrTbl__scrAreaTbl`).WaitFor(playwright.LocatorWaitForOptions{State: playwright.WaitForSelectorStateVisible}); err != nil {
 		log.Fatalf("could not wait for page to load: %v", err)
@@ -299,166 +274,27 @@ func (d *dakoku) handleRangeDakoku() bool {
 	return true
 }
 
-func (d *dakoku) promptUserForDateToClock() {
+func (d *dakoku) openDateForm() {
 	log.Printf("waiting for page to load")
 	if err := d.page.Locator(`.cm-p-scrTbl__scrAreaTbl`).WaitFor(playwright.LocatorWaitForOptions{State: playwright.WaitForSelectorStateVisible}); err != nil {
 		log.Fatalf("could not wait for page to load: %v", err)
 	}
 
-	var dayToClick int
-
-	if _inout == ASK_EVERYTIME {
-		var input string
-		var nextDay string
-		for {
-			fmt.Println("type date to access. Just the day number is enough. Examples: ")
-			fmt.Println("  7 (for the 7th day of the month)")
-			fmt.Println("  14 (for the 14th day of the month)")
-			if _prevDay != "" {
-				nextDay = d.getNextWorkingDay(_prevDay)
-				if nextDay != "" {
-					fmt.Printf("  %s (next working day. using this if input is empty)", nextDay)
-				}
-			}
-			fmt.Scanln(&input)
-			if strings.TrimSpace(input) == "" {
-				if nextDay == "" {
-					fmt.Println("no input given. prompting again")
-					continue
-				}
-
-				input = nextDay
-				_prevDay = input
-				break
-			}
-
-			_prevDay = input
-			break
-		}
-
-		i, err := strconv.Atoi(input)
-		if err != nil {
-			log.Fatalf("date to access is not an integer")
-		}
-		dayToClick = i
-	} else {
-		log.Printf("processing day %d of range", d.rangeCurrentDay)
-		dayToClick = d.rangeCurrentDay
-	}
-
 	log.Printf("finding date buttons")
 	entries, err := d.page.GetByRole(playwright.AriaRole(`button`), playwright.PageGetByRoleOptions{Name: `申請`}).All()
 	if err != nil {
-		log.Fatalf("could not get : %v", err)
+		log.Fatalf("could not get date buttons: %v", err)
 	}
 
-	log.Printf("clicking date %d's button", dayToClick)
-	if err := entries[dayToClick-1].Click(); err != nil {
-		log.Fatalf("could not click date %d's button: %v", dayToClick, err)
+	log.Printf("clicking date %d's button", d.rangeCurrentDay)
+	if err := entries[d.rangeCurrentDay-1].Click(); err != nil {
+		log.Fatalf("could not click date %d's button: %v", d.rangeCurrentDay, err)
 	}
 
 	log.Printf("clicking OK button")
 	if err := d.page.GetByRole(playwright.AriaRole(`button`), playwright.PageGetByRoleOptions{Name: `OK`}).Click(); err != nil {
 		log.Fatalf("could not click OK button: %v", err)
 	}
-}
-
-// getNextWorkingDay returns the next working day since fromString in the same month.
-// It returns "" if there is no next working day in the same month
-func (d *dakoku) getNextWorkingDay(fromString string) string {
-	now := time.Now()
-	firstOfNextMonth := time.Date(
-		now.Year(),
-		now.Month()+1,
-		1,
-		0, 0, 0, 0,
-		now.Local().Location(),
-	)
-	lastOfThisMonth := firstOfNextMonth.AddDate(0, 0, -1)
-	maxDaysThisMonth := lastOfThisMonth.Day()
-	from, err := strconv.Atoi(fromString)
-	if err != nil {
-		log.Fatalf("date to access is not an integer")
-	}
-	current := time.Date(now.Year(), now.Month(), from, 0, 0, 0, 0, now.Local().Location())
-
-	holidays := d.getAllHolidays()
-	nextDay := current.Day() + 1
-	for slices.Contains(holidays, nextDay) {
-		nextDay += 1
-	}
-
-	if nextDay > maxDaysThisMonth {
-		return ""
-	}
-
-	return fmt.Sprintf("%d", nextDay)
-}
-
-func (d *dakoku) promptUserToChooseClockInOrOut() {
-	var input string
-	fmt.Println("choose clock in or out:")
-	fmt.Println("  type i for in")
-	fmt.Println("  type o for out")
-	fmt.Scanln(&input)
-
-	switch input {
-	case CLOCK_IN:
-		log.Printf("clicking 出勤 radio")
-		if err := d.page.GetByRole(`radio`, playwright.PageGetByRoleOptions{Name: `出勤`}).Click(); err != nil {
-			log.Fatalf("could not click 出勤 radio: %v", err)
-		}
-	case CLOCK_OUT:
-		log.Printf("clicking 退勤 radio")
-		if err := d.page.GetByRole(`radio`, playwright.PageGetByRoleOptions{Name: `退勤`}).Click(); err != nil {
-			log.Fatalf("could not click 退勤 radio: %v", err)
-		}
-	default:
-		// do nothing
-	}
-}
-
-func (d *dakoku) promptUserToInputTime() {
-	var input string
-	for {
-		fmt.Println("input time. Examples:")
-		fmt.Println("  0700")
-		fmt.Println("  1815")
-		if _prevTime != "" {
-			fmt.Printf("  %s (previously set. using this if input is empty)\n", _prevTime)
-		}
-		fmt.Scanln(&input)
-
-		if strings.TrimSpace(input) == "" {
-			if _prevTime == "" {
-				fmt.Println("no input given. prompting again")
-				continue
-			}
-
-			input = _prevTime
-			break
-		}
-
-		_prevTime = input
-		break
-	}
-
-	hour := input[:2]
-	minute := input[2:]
-
-	log.Printf("filling in hour")
-	if err := d.page.GetByRole(`textbox`, playwright.PageGetByRoleOptions{Name: `時`}).Fill(hour); err != nil {
-		log.Fatalf("could not fill in hour: %v", err)
-	}
-
-	log.Printf("filling in minute")
-	if err := d.page.GetByRole(`textbox`, playwright.PageGetByRoleOptions{Name: `分`}).Fill(minute); err != nil {
-		log.Fatalf("could not fill in minute: %v", err)
-	}
-
-	d.submitOrGoBack()
-
-	// TODO: Add wait for Dakoku history URL
 }
 
 func (d *dakoku) clockWithDirectionAndTime(direction, timeInput string) {
