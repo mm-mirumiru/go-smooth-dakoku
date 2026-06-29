@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -198,7 +199,12 @@ func (d *dakoku) handleRangeDakoku() bool {
 		var startInput string
 		for {
 			fmt.Println("input start date of range. Example: 7 (for the 7th)")
+			fmt.Println("  type q to quit")
 			fmt.Scanln(&startInput)
+			if strings.TrimSpace(startInput) == "q" {
+				fmt.Println("Goodbye!")
+				os.Exit(0)
+			}
 			if strings.TrimSpace(startInput) != "" {
 				break
 			}
